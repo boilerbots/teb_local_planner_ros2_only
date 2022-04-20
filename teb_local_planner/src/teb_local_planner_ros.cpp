@@ -86,9 +86,7 @@ void TebLocalPlannerROS::initialize(nav2_util::LifecycleNode::SharedPtr node)
   if(!initialized_)
   {	
     // declare parameters (ros2-dashing)
-    intra_proc_node_.reset( 
-            new rclcpp::Node("costmap_converter", node->get_namespace(), 
-              rclcpp::NodeOptions()));
+
     cfg_->declareParameters(node, name_);
 
     // get parameters of TebConfig via the nodehandle and override the default config
@@ -128,6 +126,9 @@ void TebLocalPlannerROS::initialize(nav2_util::LifecycleNode::SharedPtr node)
     {
       try
       {
+        intra_proc_node_.reset( 
+            new rclcpp::Node("costmap_converter", node->get_namespace(), 
+              rclcpp::NodeOptions()));
         costmap_converter_ = costmap_converter_loader_.createSharedInstance(cfg_->obstacles.costmap_converter_plugin);
         std::string converter_name = costmap_converter_loader_.getName(cfg_->obstacles.costmap_converter_plugin);
         RCLCPP_INFO(logger_, "library path : %s", costmap_converter_loader_.getClassLibraryPath("costmap_converter").c_str());
