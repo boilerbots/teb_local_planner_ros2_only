@@ -173,7 +173,7 @@ void TebLocalPlannerROS::initialize(nav2_util::LifecycleNode::SharedPtr node)
         
     // setup callback for custom obstacles
     custom_obst_sub_ = node->create_subscription<costmap_converter_msgs::msg::ObstacleArrayMsg>(
-                cfg_->custom_obst_topic,
+                "obstacles", 
                 rclcpp::SystemDefaultsQoS(),
                 std::bind(&TebLocalPlannerROS::customObstacleCB, this, std::placeholders::_1));
 
