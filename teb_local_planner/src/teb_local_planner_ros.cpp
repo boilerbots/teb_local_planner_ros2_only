@@ -376,6 +376,7 @@ geometry_msgs::msg::TwistStamped TebLocalPlannerROS::computeVelocityCommands(con
     );
   }
   double max_velocity_x = cfg_->robot.max_vel_x;
+  double max_vel_theta = cfg_->robot.max_vel_theta;
 
   // Check for divergence
   if (planner_->hasDiverged())
@@ -408,9 +409,12 @@ geometry_msgs::msg::TwistStamped TebLocalPlannerROS::computeVelocityCommands(con
 
     if (unfeasible_pose > -1)
     {
+      RCLCPP_WARN_THROTTLE(logger_, *(clock_), 1, "Unfeasible pose");
+
       if (unfeasible_pose <= cfg_->trajectory.feasibility_check_stop_poses){
 
         max_velocity_x = 0.0;
+        max_vel_theta = 0.0;
         time_last_infeasible_plan_ = clock_->now();
       }
       else {
@@ -438,7 +442,7 @@ geometry_msgs::msg::TwistStamped TebLocalPlannerROS::computeVelocityCommands(con
   
   // Saturate velocity, if the optimization results violates the constraints (could be possible due to soft constraints).
   saturateVelocity(cmd_vel.twist.linear.x, cmd_vel.twist.linear.y, cmd_vel.twist.angular.z, max_velocity_x, cfg_->robot.max_vel_y,
-                   cfg_->robot.max_vel_theta, cfg_->robot.max_vel_x_backwards);
+                   max_vel_theta, cfg_->robot.max_vel_x_backwards);
 
   // convert rot-vel to steering angle if desired (carlike robot).
   // The min_turning_radius is allowed to be slighly smaller since it is a soft-constraint
