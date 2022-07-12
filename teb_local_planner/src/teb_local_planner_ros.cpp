@@ -1107,9 +1107,6 @@ void TebLocalPlannerROS::setSpeedLimit(const double& speed_limit,
         cfg_->robot.max_vel_theta = cfg_->robot.base_max_vel_theta * ratio;
 
       } else {
-        RCLCPP_WARN_THROTTLE(
-            logger_, *(clock_), 100,
-            "speed limit is bigger than base speed limits. Using base velocities");
         // Restore defaults
         cfg_->robot.max_vel_x = cfg_->robot.base_max_vel_x;
         cfg_->robot.max_vel_x_backwards = cfg_->robot.base_max_vel_x_backwards;
