@@ -211,7 +211,7 @@ void TebLocalPlannerROS::configure(
   nh_ = parent;
 
   auto node = nh_.lock();
-  logger_ = node->get_logger();
+  logger_ = node->get_logger().get_child("TEBLocalPlanner");
   clock_ = node->get_clock();
 
   costmap_ros_ = costmap_ros;
