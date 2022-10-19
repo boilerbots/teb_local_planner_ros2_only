@@ -86,9 +86,7 @@ void TebLocalPlannerROS::initialize(nav2_util::LifecycleNode::SharedPtr node)
   if(!initialized_)
   {	
     // declare parameters (ros2-dashing)
-    intra_proc_node_.reset( 
-            new rclcpp::Node("costmap_converter", node->get_namespace(), 
-              rclcpp::NodeOptions()));
+
     cfg_->declareParameters(node, name_);
 
     // get parameters of TebConfig via the nodehandle and override the default config
@@ -123,6 +121,9 @@ void TebLocalPlannerROS::initialize(nav2_util::LifecycleNode::SharedPtr node)
     {
       try
       {
+        intra_proc_node_.reset( 
+            new rclcpp::Node("costmap_converter", node->get_namespace(), 
+              rclcpp::NodeOptions()));
         costmap_converter_ = costmap_converter_loader_.createSharedInstance(cfg_->obstacles.costmap_converter_plugin);
         std::string converter_name = costmap_converter_loader_.getName(cfg_->obstacles.costmap_converter_plugin);
         RCLCPP_INFO(logger_, "library path : %s", costmap_converter_loader_.getClassLibraryPath(cfg_->obstacles.costmap_converter_plugin).c_str());
@@ -199,7 +200,7 @@ void TebLocalPlannerROS::configure(
   nh_ = parent;
 
   auto node = nh_.lock();
-  logger_ = node->get_logger();
+  logger_ = node->get_logger().get_child("TEBLocalPlanner");
   clock_ = node->get_clock();
 
   costmap_ros_ = costmap_ros;
@@ -363,6 +364,9 @@ geometry_msgs::msg::TwistStamped TebLocalPlannerROS::computeVelocityCommands(con
       std::string("teb_local_planner was not able to obtain a local plan for the current setting.")
     );
   }
+  double max_velocity_x = cfg_->robot.max_vel_x;
+  double max_velocity_x_backwards = cfg_->robot.max_vel_x_backwards;
+  double max_vel_theta = cfg_->robot.max_vel_theta;
 
   // Check for divergence
   if (planner_->hasDiverged())
@@ -391,22 +395,32 @@ geometry_msgs::msg::TwistStamped TebLocalPlannerROS::computeVelocityCommands(con
       nav2_costmap_2d::calculateMinAndMaxDistances(updated_footprint_spec_, robot_inscribed_radius_, robot_circumscribed_radius);
     }
   }
+  int unfeasible_pose = -2;
+  if (cfg_->trajectory.feasibility_check){
+    unfeasible_pose = planner_->isTrajectoryFeasible(costmap_model_.get(), footprint_spec_, robot_inscribed_radius_, robot_circumscribed_radius, cfg_->trajectory.feasibility_check_no_poses,
+    cfg_->trajectory.feasibility_check_lookahead_distance);
 
-  bool feasible = planner_->isTrajectoryFeasible(costmap_model_.get(), footprint_spec_, robot_inscribed_radius_, robot_circumscribed_radius, cfg_->trajectory.feasibility_check_no_poses, cfg_->trajectory.feasibility_check_lookahead_distance);
-  if (!feasible)
-  {
-    cmd_vel.twist.linear.x = cmd_vel.twist.linear.y = cmd_vel.twist.angular.z = 0;
-   
-    // now we reset everything to start again with the initialization of new trajectories.
-    planner_->clearPlanner();
+    if (unfeasible_pose > -1)
+    {
+      RCLCPP_WARN_THROTTLE(logger_, *(clock_), 1, "Unfeasible pose");
 
-    ++no_infeasible_plans_; // increase number of infeasible solutions in a row
-    time_last_infeasible_plan_ = clock_->now();
-    last_cmd_ = cmd_vel.twist;
-    
-    throw nav2_core::PlannerException(
-      std::string("TebLocalPlannerROS: trajectory is not feasible. Resetting planner...")
-    );
+      if (unfeasible_pose <= cfg_->trajectory.feasibility_check_stop_poses){
+
+        max_velocity_x = 0.0;
+        max_velocity_x_backwards = 0.0;
+        max_vel_theta = 0.0;
+        time_last_infeasible_plan_ = clock_->now();
+      }
+      else {
+        max_velocity_x = max_velocity_x * (double)(unfeasible_pose - cfg_->trajectory.feasibility_check_stop_poses) / (double)(cfg_->trajectory.feasibility_check_no_poses -  cfg_->trajectory.feasibility_check_stop_poses);
+      }
+    }
+  }
+  // we need to wait a bit, if a plan was infeasible
+  if((clock_->now() - time_last_infeasible_plan_).seconds()  < 4){
+    max_velocity_x = 0.0;
+    max_velocity_x_backwards = 0.0;
+    max_vel_theta = 0.0;
   }
 
   // Get the velocity command for this sampling interval
@@ -423,8 +437,8 @@ geometry_msgs::msg::TwistStamped TebLocalPlannerROS::computeVelocityCommands(con
   }
   
   // Saturate velocity, if the optimization results violates the constraints (could be possible due to soft constraints).
-  saturateVelocity(cmd_vel.twist.linear.x, cmd_vel.twist.linear.y, cmd_vel.twist.angular.z, cfg_->robot.max_vel_x, cfg_->robot.max_vel_y,
-                   cfg_->robot.max_vel_theta, cfg_->robot.max_vel_x_backwards);
+  saturateVelocity(cmd_vel.twist.linear.x, cmd_vel.twist.linear.y, cmd_vel.twist.angular.z, max_velocity_x, cfg_->robot.max_vel_y,
+                   max_vel_theta, max_velocity_x_backwards);
 
   // convert rot-vel to steering angle if desired (carlike robot).
   // The min_turning_radius is allowed to be slighly smaller since it is a soft-constraint
@@ -458,7 +472,7 @@ geometry_msgs::msg::TwistStamped TebLocalPlannerROS::computeVelocityCommands(con
   visualization_->publishObstacles(obstacles_);
   visualization_->publishViaPoints(via_points_);
   visualization_->publishGlobalPlan(global_plan_);
-  
+
   return cmd_vel;
 }
 
@@ -1033,30 +1047,44 @@ void TebLocalPlannerROS::configureBackupModes(std::vector<geometry_msgs::msg::Po
             RCLCPP_INFO(logger_, "TebLocalPlannerROS: oscillation recovery disabled/expired.");
         }
     }
-
 }
-     
 
-void TebLocalPlannerROS::setSpeedLimit(
-    const double & speed_limit, const bool & percentage)
-{
+void TebLocalPlannerROS::setSpeedLimit(const double& speed_limit,
+                                       const bool& percentage) {
   if (speed_limit == nav2_costmap_2d::NO_SPEED_LIMIT) {
-    // Restore default value
+    // Restore Defaults
     cfg_->robot.max_vel_x = cfg_->robot.base_max_vel_x;
-    cfg_->robot.base_max_vel_x_backwards = cfg_->robot.base_max_vel_x_backwards;
-    cfg_->robot.base_max_vel_y = cfg_->robot.base_max_vel_y;
-    cfg_->robot.base_max_vel_theta = cfg_->robot.base_max_vel_theta;
+    cfg_->robot.max_vel_x_backwards = cfg_->robot.base_max_vel_x_backwards;
+    cfg_->robot.max_vel_y = cfg_->robot.base_max_vel_y;
+    cfg_->robot.max_vel_theta = cfg_->robot.base_max_vel_theta;
   } else {
     if (percentage) {
-      // Speed limit is expressed in % from maximum speed of robot
-      cfg_->robot.max_vel_x = cfg_->robot.base_max_vel_x * speed_limit / 100.0;
-      cfg_->robot.base_max_vel_x_backwards = cfg_->robot.base_max_vel_x_backwards * speed_limit / 100.0;
-      cfg_->robot.base_max_vel_y = cfg_->robot.base_max_vel_y * speed_limit / 100.0;
-      cfg_->robot.base_max_vel_theta = cfg_->robot.base_max_vel_theta * speed_limit / 100.0;
+      if (speed_limit > 1.0 || speed_limit < 0.0) {
+        RCLCPP_WARN_THROTTLE(
+            logger_, *(clock_), 100,
+            "Percentage given outside the range 0-1. Using base velocities.");
+        // Restore defaults
+        cfg_->robot.max_vel_x = cfg_->robot.base_max_vel_x;
+        cfg_->robot.max_vel_x_backwards = cfg_->robot.base_max_vel_x_backwards;
+        cfg_->robot.max_vel_y = cfg_->robot.base_max_vel_y;
+        cfg_->robot.max_vel_theta = cfg_->robot.base_max_vel_theta;
+      } else {
+        // Speed limit is expressed in % from maximum speed of robot
+        cfg_->robot.max_vel_x =
+            cfg_->robot.base_max_vel_x * speed_limit / 100.0;
+        cfg_->robot.max_vel_x_backwards =
+            cfg_->robot.base_max_vel_x_backwards * speed_limit / 100.0;
+        cfg_->robot.max_vel_y =
+            cfg_->robot.base_max_vel_y * speed_limit / 100.0;
+        cfg_->robot.max_vel_theta =
+            cfg_->robot.base_max_vel_theta * speed_limit / 100.0;
+      }
     } else {
       // Speed limit is expressed in absolute value
-      double max_speed_xy = std::max(
-            std::max(cfg_->robot.base_max_vel_x,cfg_->robot.base_max_vel_x_backwards),cfg_->robot.base_max_vel_y);
+      double max_speed_xy =
+          std::max(std::max(cfg_->robot.base_max_vel_x,
+                            cfg_->robot.base_max_vel_x_backwards),
+                   cfg_->robot.base_max_vel_y);
       if (speed_limit < max_speed_xy) {
         // Handling components and angular velocity changes:
         // Max velocities are being changed in the same proportion
@@ -1065,9 +1093,17 @@ void TebLocalPlannerROS::setSpeedLimit(
         // G. Doisy: not sure if that's applicable to base_max_vel_x_backwards.
         const double ratio = speed_limit / max_speed_xy;
         cfg_->robot.max_vel_x = cfg_->robot.base_max_vel_x * ratio;
-        cfg_->robot.base_max_vel_x_backwards = cfg_->robot.base_max_vel_x_backwards * ratio;
-        cfg_->robot.base_max_vel_y = cfg_->robot.base_max_vel_y * ratio;
-        cfg_->robot.base_max_vel_theta = cfg_->robot.base_max_vel_theta * ratio;
+        cfg_->robot.max_vel_x_backwards =
+            cfg_->robot.base_max_vel_x_backwards * ratio;
+        cfg_->robot.max_vel_y = cfg_->robot.base_max_vel_y * ratio;
+        cfg_->robot.max_vel_theta = cfg_->robot.base_max_vel_theta * ratio;
+
+      } else {
+        // Restore defaults
+        cfg_->robot.max_vel_x = cfg_->robot.base_max_vel_x;
+        cfg_->robot.max_vel_x_backwards = cfg_->robot.base_max_vel_x_backwards;
+        cfg_->robot.max_vel_y = cfg_->robot.base_max_vel_y;
+        cfg_->robot.max_vel_theta = cfg_->robot.base_max_vel_theta;
       }
     }
   }

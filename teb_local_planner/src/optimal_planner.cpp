@@ -1249,7 +1249,7 @@ void TebOptimalPlanner::getFullTrajectory(std::vector<teb_msgs::msg::TrajectoryP
 }
 
 
-bool TebOptimalPlanner::isTrajectoryFeasible(dwb_critics::ObstacleFootprintCritic* costmap_model, const std::vector<geometry_msgs::msg::Point>& footprint_spec,
+int TebOptimalPlanner::isTrajectoryFeasible(dwb_critics::ObstacleFootprintCritic* costmap_model, const std::vector<geometry_msgs::msg::Point>& footprint_spec,
                                              double inscribed_radius, double circumscribed_radius, int look_ahead_idx, double feasibility_check_lookahead_distance)
 {
   if (look_ahead_idx < 0 || look_ahead_idx >= teb().sizePoses())
@@ -1274,7 +1274,7 @@ bool TebOptimalPlanner::isTrajectoryFeasible(dwb_critics::ObstacleFootprintCriti
       {
         visualization_->publishInfeasibleRobotPose(teb().Pose(i), *cfg_->robot_model);
       }
-      return false;
+      return i;
     }
     // Checks if the distance between two poses is higher than the robot radius or the orientation diff is bigger than the specified threshold
     // and interpolates in that case.
@@ -1301,20 +1301,20 @@ bool TebOptimalPlanner::isTrajectoryFeasible(dwb_critics::ObstacleFootprintCriti
             {
               visualization_->publishInfeasibleRobotPose(intermediate_pose, *cfg_->robot_model);
             }
-            return false;
+            return i;
           }
         }
       }
     }
   }
-  return true;
+  return -1;
 }
 
 bool TebOptimalPlanner::isPoseValid(geometry_msgs::msg::Pose2D pose2d, dwb_critics::ObstacleFootprintCritic* costmap_model,
                            const std::vector<geometry_msgs::msg::Point>& footprint_spec)
 {
   try {
-    if ( costmap_model->scorePose(pose2d, dwb_critics::getOrientedFootprint(pose2d, footprint_spec)) < 0 ) {
+    if ( costmap_model->scorePose(pose2d, dwb_critics::getOrientedFootprint(pose2d, footprint_spec)) > 0 ) {
       return false;
     }
   } catch (...) {
