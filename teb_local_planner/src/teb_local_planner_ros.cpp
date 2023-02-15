@@ -375,7 +375,7 @@ geometry_msgs::msg::TwistStamped TebLocalPlannerROS::computeVelocityCommands(con
 
     // Reset everything to start again with the initialization of new trajectories.
     planner_->clearPlanner();
-    RCLCPP_WARN_THROTTLE(logger_, *(clock_), 1, "TebLocalPlannerROS: the trajectory has diverged. Resetting planner...");
+    RCLCPP_WARN_THROTTLE(logger_, *(clock_), 1000, "TebLocalPlannerROS: the trajectory has diverged. Resetting planner...");
 
     ++no_infeasible_plans_; // increase number of infeasible solutions in a row
     time_last_infeasible_plan_ = clock_->now();
@@ -402,7 +402,7 @@ geometry_msgs::msg::TwistStamped TebLocalPlannerROS::computeVelocityCommands(con
 
     if (unfeasible_pose > -1)
     {
-      RCLCPP_WARN_THROTTLE(logger_, *(clock_), 1, "Unfeasible pose");
+      RCLCPP_WARN_THROTTLE(logger_, *(clock_), 1000, "Unfeasible pose");
 
       if (unfeasible_pose <= cfg_->trajectory.feasibility_check_stop_poses){
 
@@ -1055,7 +1055,7 @@ void TebLocalPlannerROS::setSpeedLimit(const double& speed_limit,
     if (percentage) {
       if (speed_limit > 1.0 || speed_limit < 0.0) {
         RCLCPP_WARN_THROTTLE(
-            logger_, *(clock_), 100,
+            logger_, *(clock_), 1000,
             "Percentage given outside the range 0-1. Using base velocities.");
         // Restore defaults
         cfg_->robot.max_vel_x = cfg_->robot.base_max_vel_x;
