@@ -1085,19 +1085,10 @@ void TebLocalPlannerROS::setSpeedLimit(const double& speed_limit,
         // as absolute linear speed changed in order to preserve
         // robot moving trajectories to be the same after speed change.
         // G. Doisy: not sure if that's applicable to base_max_vel_x_backwards.
-        const double ratio = speed_limit / max_speed_xy;
-        cfg_->robot.max_vel_x = cfg_->robot.base_max_vel_x * ratio;
-        cfg_->robot.max_vel_x_backwards =
-            cfg_->robot.base_max_vel_x_backwards * ratio;
-        cfg_->robot.max_vel_y = cfg_->robot.base_max_vel_y * ratio;
-        cfg_->robot.max_vel_theta = cfg_->robot.base_max_vel_theta * ratio;
-
+        cfg_->robot.max_vel_x = speed_limit;
       } else {
         // Restore defaults
         cfg_->robot.max_vel_x = cfg_->robot.base_max_vel_x;
-        cfg_->robot.max_vel_x_backwards = cfg_->robot.base_max_vel_x_backwards;
-        cfg_->robot.max_vel_y = cfg_->robot.base_max_vel_y;
-        cfg_->robot.max_vel_theta = cfg_->robot.base_max_vel_theta;
       }
     }
   }
